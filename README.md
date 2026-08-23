@@ -1,4 +1,4 @@
-# AI与海
+# AI and the Sea
 
 **English** | [简体中文](README.zh-CN.md)
 
