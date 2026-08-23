@@ -1,0 +1,30 @@
+/*
+ * Style entry — aggregates all stylesheets in dependency order:
+ * tokens → base → components → screens.
+ * All visual values are centralized in styles/tokens.css (single source of truth).
+ */
+
+/* Design tokens (single source of truth) */
+@import './styles/tokens.css';
+
+/* Fonts / reset / shared utilities */
+@import './styles/base.css';
+
+/* Shared components */
+@import './styles/components/button.css';
+@import './styles/components/topbar.css';
+@import './styles/components/modal.css';
+@import './styles/components/toast.css';
+@import './styles/components/tabs.css';
+@import './styles/components/editor.css';
+@import './styles/components/list.css';
+@import './styles/components/manual.css';
+@import './styles/components/api-sidebar.css';
+@import './styles/components/stats.css';
+
+/* Screen-level styles */
+@import './styles/screens/menu.css';
+@import './styles/screens/game.css';
+@import './styles/screens/match.css';
+@import './styles/screens/api-docs.css';
+@import './styles/screens/replay.css';

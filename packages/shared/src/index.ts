@@ -1,0 +1,25 @@
+// 主入口: 全部模块。具名 re-export 保证 tsc 产物静态可分析。
+export { GAME_VERSION } from './version';
+export { TIMEOUT_MS, LOAD_TIMEOUT_MS, MAX_FEED, DEFAULT_MAX_TURNS, TURN_INTERVAL_MS, TURN_INTERVALS_MS, START_MONEY, MAX_ENERGY, CHARGE_GAIN, HARVEST_ROW_COL_COST, FEED_ROW_COL_COST, INTERCEPT_ROW_COL_COST, CHANGE_TILE_COST, PURIFY_COST, PURIFY_ROW_COL_COST, PURIFY_GAIN, MAX_LOG_LINES, MAX_LOGS_PER_TURN, INITIAL_TILE_QUALITY, MAX_TILE_QUALITY } from './config';
+export type { Position, InternalOperation, TileInfo, FishInfo, BoatInfo, GameInfo, PlayerView, FishData, Tile, BoatState, PlayerState, WorldState, SnapshotTile, SnapshotBoat, SnapshotPlayer, SnapshotState, GameResult, GameEvent, GameMode, Frame } from './types';
+export { TileType, FishType, FishState } from './types';
+export { normalizeOp } from './ops';
+export type { NormalizeResult } from './ops';
+export { TILES, FISHES, BaseTile, BaseFish, isFishType, fishConfig, fishInfo, stockableTiles } from './registry';
+export type { TileTypeConfig, FishTypeConfig } from './registry';
+export { SINGLE_WIDTH, SINGLE_HEIGHT, COMBAT_WIDTH, COMBAT_HEIGHT, mirrorPosition, createSingleWorld, createCombatWorld, isOwnHalf, isOwnHalfAt, inBounds, tileAt, samePos, orthNeighbors, placeFish, isFeed } from './maps';
+export { toLocal, fromLocal, buildPlayerView, snapshotOf, findBoatAt } from './view';
+export { playerApiFactory, BoatOperation, Move, Teleport, NewBoat, Stock, CollectFeed, Feed, Catch, Clear, Intercept, Charge, CatchRow, CatchCol, FeedRow, FeedCol, InterceptRow, InterceptCol, StockRow, StockCol, ChangeTile, Purify, PurifyRow, PurifyCol, OPS } from './player-api';
+export type { PlayerApi, PlayerConsole } from './player-api';
+export { stepTurn } from './engine';
+export type { BoatAction } from './engine';
+export { GameController } from './game-controller';
+export { ReplayRecorder, wrapProgramForReplay, replayEvents, makeScriptedPlayer, replayVersionMismatch } from './replay';
+export type { ReplayFile, ReplayRound, ReplayBoatOp, ReplayPlayerConfig } from './replay';
+export type { PlayerProgram, PlayerTurnResult, GamePlayer, GameControllerOptions } from './game-controller';
+export { compilePlayerCode, setWasmUrl, setWasmModule, isCompilerInitialized, compilerState, prewarmCompiler } from './compile';
+export type { CompileResult, CompileError } from './compile';
+export { DOC_OPERATIONS, DOC_FUNCTIONS, DOC_TYPES, DOC_RULES, DOC_OVERVIEW, DOC_SECTIONS, fishDocEntries, sectionMarkdown } from './docs';
+export { API_DOC_GROUPS, API_DOC_CONVENTIONS, apiDocsMarkdown, llmTxt } from './api-docs';
+export type { ApiDocGroup, ApiDocEndpoint, ApiDocResponse } from './api-docs';
+export type { DocEntry, DocSection, DocParagraphSection, DocSectionId } from './docs';

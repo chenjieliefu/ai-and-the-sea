@@ -1,0 +1,193 @@
+/* Main menu / start screen. */
+
+.menu-box {
+  flex: 1 1 0;
+  min-height: 0;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: safe center;
+  gap: 18px;
+  padding: 24px 40px;
+  overflow-y: auto;
+  position: relative;
+}
+
+.menu-logo-wrap {
+  position: relative;
+}
+
+/* Soft blurred halo behind the logo, tinted with the accent green. */
+.menu-logo-wrap::before {
+  content: '';
+  position: absolute;
+  inset: -20px -44px;
+  background: radial-gradient(closest-side, var(--accent-glow), transparent 72%);
+  filter: blur(34px);
+  border-radius: 50%;
+  pointer-events: none;
+  animation: menu-logo-glow 3.2s var(--ease-in-out) infinite alternate;
+}
+
+@keyframes menu-logo-glow {
+  from {
+    opacity: 0.72;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.menu-logo {
+  height: 135px;
+  width: auto;
+  display: block;
+  position: relative;
+  z-index: 1;
+}
+
+/* A Minecraft-style, gently breathing pixel tagline pinned over the logo. */
+.menu-slogan {
+  display: none;
+  position: absolute;
+  top: 2px;
+  left: -80px;
+  color: var(--money);
+  font-family: var(--font-display);
+  font-size: 16px;
+  line-height: 1;
+  text-shadow: 1px 1px 0 var(--bg-log);
+  transform: rotate(-12deg);
+  transform-origin: left center;
+  white-space: nowrap;
+  animation: menu-slogan-breathe 1.6s var(--ease-in-out) infinite alternate;
+}
+
+@keyframes menu-slogan-breathe {
+  from {
+    opacity: 0.78;
+    transform: rotate(-12deg) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(-12deg) scale(1.04);
+  }
+}
+
+.menu-version {
+  color: var(--text-faint);
+  font-family: var(--font-display);
+  font-size: 14px;
+  margin-top: -6px;
+}
+
+.menu-hero {
+  display: flex;
+  gap: 40px;
+  justify-content: center;
+  align-items: stretch;
+}
+
+.menu-tagline {
+  color: var(--text-muted);
+  font-weight: 700;
+  font-size: 15px;
+  margin-top: -6px;
+}
+
+.menu-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  width: min(660px, 90vw);
+}
+
+.menu-grid .btn {
+  padding: 12px 8px;
+  font-size: 15px;
+}
+
+/* MCP card on the main menu (collapsible, collapsed by default). */
+.menu-mcp {
+  width: min(660px, 90vw);
+  text-align: left;
+  margin-bottom: 0;
+  padding: 8px 12px;
+}
+
+.menu-mcp summary {
+  font-size: 14px;
+  font-weight: 600;
+  padding: 2px 0;
+}
+
+.menu-mcp .mcp-guide {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8px;
+  background: var(--bg-raised);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+}
+
+.menu-mcp .mcp-guide .mcp-guide-lead {
+  width: 100%;
+  margin: 0 0 2px;
+}
+
+.menu-mcp .mcp-guide .mcp-method {
+  flex: 1;
+  min-width: 200px;
+  margin: 0;
+}
+
+/* Studio credit at the bottom of the menu. */
+.menu-powered {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-faint);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.menu-powered:hover {
+  color: var(--text-muted);
+}
+
+.menu-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-faint);
+  font-size: 12px;
+  text-decoration: none;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.menu-ghost:hover {
+  color: var(--text-muted);
+  border-color: var(--border-strong);
+}
+
+.ghost-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.menu-footer {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.bystudio-logo {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}

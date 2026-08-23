@@ -1,0 +1,21 @@
+{
+  "name": "aiyu",
+  "version": "2.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @aiyu/shared && npm run build -w @aiyu/backend && npm run build -w @aiyu/frontend",
+    "package": "node scripts/package.mjs",
+    "test": "npm run test -w @aiyu/shared && npm run test -w @aiyu/backend",
+    "typecheck": "npm run typecheck -ws --if-present",
+    "dev:shared": "npm run dev -w @aiyu/shared",
+    "dev:backend": "npm run dev -w @aiyu/backend",
+    "dev:frontend": "npm run dev -w @aiyu/frontend"
+  },
+  "dependencies": {
+    "@babel/runtime": "^8.0.0",
+    "@uiw/codemirror-theme-tokyo-night": "^4.25.11"
+  }
+}

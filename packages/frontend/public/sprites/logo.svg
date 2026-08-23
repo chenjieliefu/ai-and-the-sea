@@ -1,0 +1,35 @@
+<svg width="780" height="220" xmlns="http://www.w3.org/2000/svg" xml:space="preserve" overflow="visible">
+  <defs>
+    <linearGradient id="fishGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6cbcf0"/>
+      <stop offset="1" stop-color="#2c78b8"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Fish icon -->
+  <g transform="translate(30,40)">
+    <!-- tail -->
+    <path d="M60 70 L118 34 L118 106 Z" fill="#4fa8e8" stroke="#cfeaff" stroke-width="3" stroke-linejoin="round"/>
+    <!-- body -->
+    <ellipse cx="92" cy="70" rx="72" ry="46" fill="url(#fishGrad)" stroke="#cfeaff" stroke-width="3"/>
+    <!-- dorsal fin -->
+    <path d="M62 34 C78 12 108 16 120 34 Z" fill="#7cc8f4" stroke="#cfeaff" stroke-width="2" stroke-linejoin="round"/>
+    <!-- belly fin -->
+    <path d="M66 106 C82 128 106 124 118 106 Z" fill="#7cc8f4" stroke="#cfeaff" stroke-width="2" stroke-linejoin="round"/>
+    <!-- gill line -->
+    <path d="M124 46 C136 60 136 80 124 94" stroke="#cfeaff" stroke-width="2.5" fill="none" opacity="0.6"/>
+    <!-- eye -->
+    <circle cx="150" cy="64" r="9" fill="#ffffff"/>
+    <circle cx="153" cy="63" r="4.5" fill="#08131f"/>
+    <!-- bubbles -->
+    <circle cx="190" cy="48" r="5" fill="#7cc8f4" opacity="0.7"/>
+    <circle cx="204" cy="34" r="3.5" fill="#7cc8f4" opacity="0.5"/>
+  </g>
+
+  <!-- Wave underline -->
+  <path d="M20 178 C60 162 100 194 140 178 C180 162 220 194 260 178 C300 162 340 194 380 178 C420 162 460 194 500 178 C540 162 580 194 620 178 C660 162 700 194 740 178"
+        fill="none" stroke="#4fa8e8" stroke-width="6" stroke-linecap="round" opacity="0.8"/>
+
+  <!-- Title -->
+  <text x="240" y="138" fill="#ffffff" font-family="'PingFang SC','Microsoft YaHei','Segoe UI',sans-serif" font-weight="800" font-size="104" letter-spacing="6">AI与海</text>
+</svg>

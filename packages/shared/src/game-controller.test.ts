@@ -1,0 +1,233 @@
+import { describe, expect, it } from 'vitest';
+import { GameController, PlayerProgram, PlayerTurnResult } from './game-controller';
+import { PlayerView, FishState, FishType } from './types';
+import { Move } from './player-api';
+import { placeFish } from './maps';
+
+/** 简单的脚本化玩家程序, 不依赖平台沙箱 */
+class ScriptedProgram implements PlayerProgram {
+  constructor(private script: (boatId: number, view: PlayerView, turn: number) => any) {}
+  async runTurn(boatId: number, view: PlayerView): Promise<PlayerTurnResult> {
+    const op = this.script(boatId, view, view.turn);
+    return { operation: op ?? null, durationMs: 10, logs: [] };
+  }
+  dispose() {}
+}
+
+class FailingProgram implements PlayerProgram {
+  constructor(private readonly msg: string) {}
+  async runTurn(): Promise<PlayerTurnResult> {
+    return { operation: null, durationMs: 0, logs: [], error: this.msg };
+  }
+  dispose() {}
+}
+
+const me = (script: (d: number, v: PlayerView, t: number) => any) => ({
+  name: '玩家',
+  frame: 'normal' as const,
+  program: new ScriptedProgram(script),
+});
+
+async function runToEnd(controller: GameController): Promise<{ events: any[]; over: boolean }> {
+  const all: any[] = [];
+  let over = false;
+  for (let i = 0; i < 500 && !controller.over; i++) {
+    const events = await controller.step();
+    all.push(...events);
+    if (events.some((e) => e.type === 'end')) {
+      over = true;
+      break;
+    }
+  }
+  return { events: all, over };
+}
+
+describe('GameController: 单人投放', () => {
+  it('运行完整一局并正常结束, 视图回合数与金钱正确', async () => {
+    let seenTurn: number[] = [];
+    const controller = new GameController({
+      mode: 'single',
+      maxTurns: 10,
+      players: [
+        me((boatId, view) => {
+          seenTurn.push(view.turn);
+          if (view.turn === 1) return { type: 'stock', fish: FishType.Shrimp };
+          if (view.turn === 7) return { type: 'catch' };
+          return null;
+        }),
+      ],
+    });
+    const { events, over } = await runToEnd(controller);
+    expect(over).toBe(true);
+    const end = events.find((e) => e.type === 'end');
+    expect(end.result.type).toBe('finished');
+    // 第 1 回合投放, 成熟需 5 回合, 第 7 回合捕捞 (+5)
+    expect(end.result.scores[0].money).toBe(25);
+    // 视图回合从 1 到 10
+    expect(seenTurn).toHaveLength(10);
+    expect(seenTurn[0]).toBe(1);
+    // 每回合都有快照
+    expect(events.filter((e) => e.type === 'snapshot')).toHaveLength(10);
+    // 快照回合号 = 刚完成的回合号 (1..10), 与 turn 事件一致, 无 +1 错位 (曾出现 501/500)
+    const snapTurns = events.filter((e) => e.type === 'snapshot').map((e) => e.state.turn);
+    expect(snapTurns).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    const turnEvents = events.filter((e) => e.type === 'turn').map((e) => e.turn);
+    expect(snapTurns).toEqual(turnEvents);
+  });
+
+  it('程序报错导致游戏提前结束', async () => {
+    const controller = new GameController({
+      mode: 'single',
+      maxTurns: 300,
+      players: [
+        { name: '玩家', frame: 'normal', program: new FailingProgram('出错了') },
+      ],
+    });
+    const { events } = await runToEnd(controller);
+    const end = events.find((e) => e.type === 'end');
+    expect(end.result.type).toBe('error');
+    expect(end.result.message).toContain('出错了');
+  });
+});
+
+describe('GameController: 竞技模式视图坐标系', () => {
+  it('P2 的视图为镜像: 自己的渔船在左侧, 对方在右侧', async () => {
+    const views: PlayerView[] = [];
+    const controller = new GameController({
+      mode: 'combat',
+      maxTurns: 5,
+      players: [
+        me((_d, _v) => null),
+        {
+          name: '对手',
+          frame: 'mirror',
+          program: new ScriptedProgram((boatId, view) => {
+            views.push(view);
+            return null;
+          }),
+        },
+      ],
+    });
+    await runToEnd(controller);
+    const v = views[0];
+    expect(v.map.width).toBe(14);
+    // P2 自己的渔船在本地坐标左侧
+    const own = v.boats.filter((d) => !d.isOpponent);
+    expect(own).toHaveLength(2);
+    for (const d of own) expect(d.position[0]).toBeLessThan(7);
+    // 对方 (P1) 的渔船在本地坐标右侧
+    const enemy = v.boats.filter((d) => d.isOpponent);
+    expect(enemy).toHaveLength(2);
+    for (const d of enemy) expect(d.position[0]).toBeGreaterThanOrEqual(7);
+    // getSelf 对应 boatId
+    expect(v.self.id).toBe(0);
+    expect(v.self.isOpponent).toBe(false);
+  });
+
+  it('P2 (mirror 帧) 的 Move 目标坐标会被映射回绝对坐标', async () => {
+    const controller = new GameController({
+      mode: 'combat',
+      maxTurns: 3,
+      players: [
+        me((_d, _v) => null),
+        {
+          name: '对手',
+          frame: 'mirror',
+          program: new ScriptedProgram((boatId, view) => {
+            // 本地坐标系: 自己的渔船在左侧 (本地 x ∈ [0,6]);
+            // 返回本地坐标中的相邻格移动
+            const self = view.boats[boatId];
+            return new Move([self.position[0] + 1, self.position[1]]);
+          }),
+        },
+      ],
+    });
+    const { events } = await runToEnd(controller);
+    const moveEvents = events.filter((e) => e.type === 'move');
+    expect(moveEvents.length).toBeGreaterThan(0);
+    for (const m of moveEvents) {
+      const dx = Math.abs(m.to[0] - m.from[0]);
+      const dy = Math.abs(m.to[1] - m.from[1]);
+      // 绝对坐标下目标与出发地相邻 (若不转换, 目标落在 x<7 的对方半场, 距离>1 被拒绝)
+      expect(dx + dy).toBe(1);
+      // 目标仍在 P2 半场 (绝对 x >= 7)
+      expect(m.to[0]).toBeGreaterThanOrEqual(7);
+    }
+  });
+
+  it('竞技模式捕捞对方半场鱼时 money 不变 (进入 bounty)', async () => {
+    const controller = new GameController({
+      mode: 'combat',
+      maxTurns: 20,
+      players: [
+        me((boatId, view) => {
+          // 第 1 回合: 捕捞 (测试先在地图上放置成熟鱼并移动渔船)
+          if (view.turn === 1) return { type: 'catch' };
+          return null;
+        }),
+        { name: '对手', frame: 'mirror', program: new ScriptedProgram(() => null) },
+      ],
+    });
+    // 预先在 (8,2) 放一颗成熟小虾 (对方半场), 并把 boat0 放到该格
+    placeFish(controller.world, [8, 2], {
+      type: FishType.Shrimp,
+      state: FishState.Grown,
+      growthRemaining: 0,
+    });
+    controller.world.boats[0].position = [8, 2];
+    await runToEnd(controller);
+    // 捕捞进入 bounty, 未返回己方半场前不计入金钱
+    expect(controller.world.boats[0].bounty).toBe(5);
+    expect(controller.world.players[0].money).toBe(20);
+  });
+
+  it('玩家操作类 (class API) 经控制器规范化后执行', async () => {
+    const controller = new GameController({
+      mode: 'single',
+      maxTurns: 5,
+      players: [
+        {
+          name: '玩家',
+          frame: 'normal',
+          program: new ScriptedProgram((_d, view) => {
+            // 使用玩家侧操作类, 而非纯对象
+            if (view.turn === 1) return new Move([2, 3]); // 相邻格
+            if (view.turn === 2) return new Move([3, 3]); // 回到出生点
+            return null;
+          }),
+        },
+      ],
+    });
+    await runToEnd(controller);
+    expect(controller.world.boats[0].position).toEqual([3, 3]);
+  });
+});
+
+describe('GameController: NewBoat', () => {
+  it('创建的新渔船在下一回合开始执行代码 (boatId 顺延为 1)', async () => {
+    const called: number[][] = []; // 每回合被调用的 boatId 列表
+    const controller = new GameController({
+      mode: 'single',
+      maxTurns: 8,
+      players: [
+        me((boatId, view) => {
+          if (!called[view.turn]) called[view.turn] = [];
+          called[view.turn].push(boatId);
+          if (view.turn === 1) return { type: 'newBoat', at: [6, 6] };
+          if (boatId === 1 && view.turn >= 2) return { type: 'move', to: [5, 6] };
+          return null;
+        }),
+      ],
+    });
+    controller.world.players[0].money = 5000; // 支付 NewBoat 费用
+    const { events } = await runToEnd(controller);
+    expect(events.some((e) => e.type === 'new-boat')).toBe(true);
+    // 第 1 回合只有 boatId 0; 第 2 回合起 boatId 0 和 1 都被调用
+    expect(called[1]).toEqual([0]);
+    expect(called[2]).toEqual([0, 1]);
+    expect(called[3]).toEqual([0, 1]);
+    // 新渔船执行了移动
+    const moves = events.filter((e) => e.type === 'move' && e.boat !== undefined);
+    expect(moves.some((e) => JSON.stringify(e.from) === '[6,6]' && JSON.stringify(e.to) === '[5,6]')).toBe(true);
+  });
+});

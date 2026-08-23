@@ -1,0 +1,1092 @@
+import { describe, expect, it } from 'vitest';
+import { stepTurn } from './engine';
+import { createCombatWorld, createSingleWorld, placeFish } from './maps';
+import { FishState, FishType, GameEvent, TileType } from './types';
+
+const single = () => createSingleWorld(300);
+const combat = () => createCombatWorld(300);
+
+function actions(...items: [number, any][]): Record<number, { op: any; durationMs: number }> {
+  const out: Record<number, { op: any; durationMs: number }> = {};
+  for (const [id, op] of items) out[id] = { op, durationMs: 10 };
+  return out;
+}
+
+function eventsOfType(events: GameEvent[], type: string): GameEvent[] {
+  return events.filter((e) => e.type === type);
+}
+
+describe('engine: 投放与捕捞周期', () => {
+  it('投放小虾: 0 成本, 5 回合成熟, 捕捞得 5 金钱', () => {
+    const world = single();
+    // 回合 1: 投放
+    let events = stepTurn(world, actions([0, { type: 'stock', fish: FishType.Shrimp }]));
+    expect(eventsOfType(events, 'stock')).toHaveLength(1);
+    expect(world.map[3][3].fish?.state).toBe(FishState.Growing);
+    expect(world.players[0].money).toBe(20); // 投放成本 0
+
+    // 投放回合即算第 1 个生长周期: 之后 3 个空回合仍是 Growing (剩 1 周期)
+    for (let i = 0; i < 3; i++) stepTurn(world, actions([0, null]));
+    expect(world.map[3][3].fish?.state).toBe(FishState.Growing);
+    expect(world.map[3][3].fish?.growthRemaining).toBe(1);
+    // 第 5 个生长周期结束即成熟
+    stepTurn(world, actions([0, null]));
+    expect(world.map[3][3].fish?.state).toBe(FishState.Grown);
+
+    // 捕捞
+    events = stepTurn(world, actions([0, { type: 'catch' }]));
+    expect(eventsOfType(events, 'catch')).toHaveLength(1);
+    expect(world.map[3][3].fish).toBeNull();
+    expect(world.players[0].money).toBe(25); // 20 + 5
+  });
+
+  it('未成熟时捕捞无效', () => {
+    const world = single();
+    stepTurn(world, actions([0, { type: 'stock', fish: FishType.Shrimp }]));
+    const events = stepTurn(world, actions([0, { type: 'catch' }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1);
+    expect(world.map[3][3].fish).not.toBeNull();
+  });
+
+  it('小虾无需投喂, 从不进入缺食状态并正常成熟', () => {
+    const world = single();
+    stepTurn(world, actions([0, { type: 'stock', fish: FishType.Shrimp }]));
+    let hungry = false;
+    for (let i = 0; i < 30; i++) {
+      const events = stepTurn(world, actions([0, null]));
+      const grow = eventsOfType(events, 'fish-grow')[0] as any;
+      if (grow && grow.state === FishState.Hungry) hungry = true;
+    }
+    expect(hungry).toBe(false);
+    expect(world.map[3][3].fish?.state).toBe(FishState.Grown);
+  });
+
+  it('水域已被占用时不能重复投放', () => {
+    const world = single();
+    stepTurn(world, actions([0, { type: 'stock', fish: FishType.Shrimp }]));
+    const events = stepTurn(world, actions([0, { type: 'stock', fish: FishType.Shrimp }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1);
+  });
+
+  it('深水上不能投放 (小虾为陆生)', () => {
+    const world = single();
+    // 把渔船直接放到 (1,1) 深水
+    world.boats[0].position = [1, 1];
+    const events = stepTurn(world, actions([0, { type: 'stock', fish: FishType.Shrimp }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1);
+    expect(world.players[0].money).toBe(20);
+  });
+});
+
+describe('engine: 各类鱼 (注册表驱动)', () => {
+  it('沙丁鱼: 20 成本, 15 回合成熟, 无需投喂, 捕捞 +40', () => {
+    const world = single();
+    stepTurn(world, actions([0, { type: 'stock', fish: FishType.Sardine }]));
+    expect(world.players[0].money).toBe(0); // 20 - 20
+    for (let i = 0; i < 13; i++) stepTurn(world, actions([0, null]));
+    expect(world.map[3][3].fish?.state).toBe(FishState.Growing); // 还差 1 周期
+    stepTurn(world, actions([0, null]));
+    expect(world.map[3][3].fish?.state).toBe(FishState.Grown);
+    stepTurn(world, actions([0, { type: 'catch' }]));
+    expect(world.players[0].money).toBe(40); // 0 + 40
+  });
+
+  it('河豚: 30 成本, 30 回合生长, 缺食 2 次, 捕捞 +180', () => {
+    const world = single();
+    world.players[0].money = 100; // 初始资金不够, 直接补给
+    stepTurn(world, actions([0, { type: 'stock', fish: FishType.Pufferfish }]));
+    expect(world.players[0].money).toBe(70);
+    let hungryCount = 0;
+    for (let i = 0; i < 60; i++) {
+      if (world.map[3][3].fish?.state === FishState.Hungry) {
+        hungryCount++;
+        world.boats[0].feed = 1;
+        stepTurn(world, actions([0, { type: 'feed' }]));
+      } else {
+        stepTurn(world, actions([0, null]));
+      }
+      if (world.map[3][3].fish?.state === FishState.Grown) break;
+    }
+    expect(hungryCount).toBe(2);
+    expect(world.map[3][3].fish?.state).toBe(FishState.Grown);
+    stepTurn(world, actions([0, { type: 'catch' }]));
+    expect(world.players[0].money).toBe(250); // 70 + 180
+  });
+
+  it('带鱼: 水生, 只能种在深水, 40 回合成熟, 捕捞 +90', () => {
+    const world = single();
+    world.players[0].money = 100; // 初始资金不够, 直接补给
+    // 陆地上不能种带鱼
+    const bad = stepTurn(world, actions([0, { type: 'stock', fish: FishType.Hairtail }]));
+    expect(eventsOfType(bad, 'invalid-op')).toHaveLength(1);
+    // 深水上可以
+    world.boats[0].position = [1, 1];
+    stepTurn(world, actions([0, { type: 'stock', fish: FishType.Hairtail }]));
+    expect(world.players[0].money).toBe(70); // 100 - 30 (已补给)
+    for (let i = 0; i < 38; i++) stepTurn(world, actions([0, null]));
+    expect(world.map[1][1].fish?.state).toBe(FishState.Growing);
+    stepTurn(world, actions([0, null]));
+    expect(world.map[1][1].fish?.state).toBe(FishState.Grown);
+    stepTurn(world, actions([0, { type: 'catch' }]));
+    expect(world.players[0].money).toBe(160); // 70 + 90
+  });
+
+  it('鲨鱼: 300 成本, 50 回合生长, 缺食 5 次, 捕捞 +700', () => {
+    const world = single();
+    world.players[0].money = 400; // 初始资金不够, 直接补给
+    stepTurn(world, actions([0, { type: 'stock', fish: FishType.Shark }]));
+    expect(world.players[0].money).toBe(100); // 400 - 300
+    let hungryCount = 0;
+    for (let i = 0; i < 200; i++) {
+      if (world.map[3][3].fish?.state === FishState.Hungry) {
+        hungryCount++;
+        world.boats[0].feed = 1;
+        stepTurn(world, actions([0, { type: 'feed' }]));
+      } else {
+        stepTurn(world, actions([0, null]));
+      }
+      if (world.map[3][3].fish?.state === FishState.Grown) break;
+    }
+    expect(hungryCount).toBe(5);
+    expect(world.map[3][3].fish?.state).toBe(FishState.Grown);
+    stepTurn(world, actions([0, { type: 'catch' }]));
+    expect(world.players[0].money).toBe(800); // 100 + 700
+  });
+});
+
+describe('engine: 移动与仲裁', () => {
+  it('目标格被静止渔船占据时无法移动', () => {
+    const w = combat();
+    // boat2 (P2) 静止在 (4,2), boat0 (P1) 尝试移入
+    w.boats[2].position = [4, 2];
+    const events = stepTurn(w, actions([0, { type: 'move', to: [4, 2] }]));
+    expect(eventsOfType(events, 'move-blocked')).toHaveLength(1);
+    expect(w.boats[0].position).toEqual([3, 2]);
+  });
+
+  it('两架渔船争抢同一格: 执行时间短者获胜', () => {
+    const w = combat();
+    // boat0 (3,2) 与 boat2 (5,2) 同时争抢 (4,2)
+    w.boats[2].position = [5, 2];
+    const events = stepTurn(
+      w,
+      {
+        0: { op: { type: 'move', to: [4, 2] }, durationMs: 20 },
+        2: { op: { type: 'move', to: [4, 2] }, durationMs: 5 },
+      } as any
+    );
+    expect(eventsOfType(events, 'move')).toHaveLength(1);
+    expect(w.boats[2].position).toEqual([4, 2]); // 耗时短者成功
+    expect(w.boats[0].position).toEqual([3, 2]); // 失败者原地不动
+  });
+
+  it('两架渔船同时向不同方向移动互不影响', () => {
+    const w = combat();
+    // boat0 (3,2) -> (4,2), boat2 (10,2) -> (9,2)
+    const events = stepTurn(
+      w,
+      {
+        0: { op: { type: 'move', to: [4, 2] }, durationMs: 10 },
+        2: { op: { type: 'move', to: [9, 2] }, durationMs: 10 },
+      } as any
+    );
+    expect(eventsOfType(events, 'move')).toHaveLength(2);
+    expect(w.boats[0].position).toEqual([4, 2]);
+    expect(w.boats[2].position).toEqual([9, 2]);
+  });
+
+  it('相邻互换被仲裁阻止 (目标格回合开始时仍被占据)', () => {
+    const w = combat();
+    // boat0 (3,2) <-> boat2 (4,2): 双方目标都被对方占据, 均不移动
+    w.boats[2].position = [4, 2];
+    const events = stepTurn(
+      w,
+      {
+        0: { op: { type: 'move', to: [4, 2] }, durationMs: 10 },
+        2: { op: { type: 'move', to: [3, 2] }, durationMs: 10 },
+      } as any
+    );
+    expect(eventsOfType(events, 'move')).toHaveLength(0);
+    expect(w.boats[0].position).toEqual([3, 2]);
+    expect(w.boats[2].position).toEqual([4, 2]);
+  });
+
+  it('移动范围限制: 超出周围 8 格不移动并报错', () => {
+    const world = single();
+    // (3,3) -> (1,1) 距离 2 格, 超出范围
+    let events = stepTurn(world, actions([0, { type: 'move', to: [1, 1] }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1);
+    expect(world.boats[0].position).toEqual([3, 3]); // 不移动
+    // 原地不动也是无效移动
+    events = stepTurn(world, actions([0, { type: 'move', to: [3, 3] }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1);
+    // 相邻格 (含斜角) 合法
+    for (const to of [[2, 3], [4, 3], [2, 2], [4, 2]]) {
+      world.boats[0].position = [3, 3];
+      events = stepTurn(world, actions([0, { type: 'move', to }]));
+      expect(eventsOfType(events, 'invalid-op')).toHaveLength(0);
+      expect(eventsOfType(events, 'move')).toHaveLength(1);
+    }
+  });
+
+  it('移动越界无效 (相邻格但在地图外)', () => {
+    const world = single();
+    world.boats[0].position = [0, 0];
+    const events = stepTurn(world, actions([0, { type: 'move', to: [-1, 0] }]));
+    expect(eventsOfType(events, 'move-blocked')).toHaveLength(1);
+  });
+});
+
+describe('engine: 缺食机制 (无枯萎, 长期 Hungry)', () => {
+  it('缺食鱼长期保持 Hungry, 生长不推进; 投喂后从剩余进度继续生长', () => {
+    const world = single();
+    // 手动放一颗缺食鱼: 还剩 2 周期成熟
+    placeFish(world, [3, 3], { type: FishType.Shrimp, state: FishState.Hungry, growthRemaining: 2 });
+    // 长期不投喂: 保持 Hungry, 不枯萎, 生长不推进
+    for (let i = 0; i < 10; i++) {
+      const events = stepTurn(world, actions([0, null]));
+      const grow = eventsOfType(events, 'fish-grow')[0] as any;
+      expect(grow.state).toBe(FishState.Hungry);
+    }
+    expect(world.map[3][3].fish?.state).toBe(FishState.Hungry);
+    expect(world.map[3][3].fish?.growthRemaining).toBe(2); // 生长未推进
+
+    // 投喂后恢复生长; 投喂的当回合结束即完成一次生长 (2 -> 1)
+    world.boats[0].feed = 1;
+    let events = stepTurn(world, actions([0, { type: 'feed' }]));
+    expect(eventsOfType(events, 'feed')).toHaveLength(1);
+    expect(world.map[3][3].fish?.state).toBe(FishState.Growing);
+    expect(world.map[3][3].fish?.growthRemaining).toBe(1);
+    stepTurn(world, actions([0, null]));
+    expect(world.map[3][3].fish?.state).toBe(FishState.Grown);
+    expect(world.boats[0].feed).toBe(0); // 消耗 1 格水
+  });
+
+  it('对非缺食鱼投喂无效', () => {
+    const world = single();
+    placeFish(world, [3, 3], { type: FishType.Shrimp, state: FishState.Growing, growthRemaining: 5 });
+    world.boats[0].feed = 1;
+    const events = stepTurn(world, actions([0, { type: 'feed' }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1);
+    expect(world.boats[0].feed).toBe(1);
+  });
+});
+
+describe('engine: 补给饲料', () => {
+  it('在深水补给饲料, 一次取满 5 格, 已满时无效', () => {
+    const world = single();
+    world.boats[0].position = [1, 1];
+    // 一次取满
+    let events = stepTurn(world, actions([0, { type: 'collectFeed' }]));
+    expect(eventsOfType(events, 'collect-feed')).toHaveLength(1);
+    expect(world.boats[0].feed).toBe(5);
+    // 已满再取无效
+    events = stepTurn(world, actions([0, { type: 'collectFeed' }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1);
+    expect(world.boats[0].feed).toBe(5);
+  });
+
+  it('不在深水上无法补给饲料', () => {
+    const world = single();
+    const events = stepTurn(world, actions([0, { type: 'collectFeed' }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1);
+  });
+});
+
+describe('engine: 偷菜与拦截', () => {
+  it('在对方半场捕捞进入临时资金池, 返回己方半场后入账', () => {
+    const w = combat();
+    // 在对方半场 (8,3) 放一颗成熟小虾, boat0 直接站在上面
+    placeFish(w, [8, 3], { type: FishType.Shrimp, state: FishState.Grown, growthRemaining: 0});
+    w.boats[0].position = [8, 3];
+    let events = stepTurn(w, actions([0, { type: 'catch' }]));
+    const caught = eventsOfType(events, 'catch')[0] as any;
+    expect(caught.stole).toBe(true);
+    expect(w.boats[0].bounty).toBe(5); // 进入临时资金池
+    expect(w.players[0].money).toBe(20); // 未入账
+
+    // 返回己方半场 (5,3): 该回合结束时自动入账
+    w.boats[0].position = [5, 3];
+    events = stepTurn(w, actions([0, null]));
+    expect(eventsOfType(events, 'stash')).toHaveLength(1);
+    expect(w.boats[0].bounty).toBe(0);
+    expect(w.players[0].money).toBe(25); // 20 + 5
+  });
+
+  it('偷菜者被拦截: 资金池清空, 资金返还给受害方', () => {
+    const w = combat();
+    // boat0 (P1) 在对方半场, 带 5 金币偷菜资金
+    w.boats[0].position = [5, 3];
+    w.boats[0].bounty = 5;
+    // P2 的 boat2 在 (4,3), 本回合拦截 (5,3)
+    // boat0 本回合移动到 (6,3)? 拦截目标需是回合结束时所在位置: 设目标 (5,3) 且 boat0 不动
+    const events = stepTurn(
+      w,
+      {
+        0: null,
+        2: { op: { type: 'intercept', at: [5, 3] }, durationMs: 5 },
+      } as any
+    );
+    const intercepts = eventsOfType(events, 'intercept') as any[];
+    expect(intercepts).toHaveLength(1);
+    expect(intercepts[0].bounty).toBe(5);
+    expect(w.boats[0].bounty).toBe(0);
+    expect(w.players[1].money).toBe(25); // 资金返还给受害方 P2
+    expect(w.players[0].money).toBe(20);
+    // 不再产生 stash (资金已清空)
+    expect(eventsOfType(events, 'stash')).toHaveLength(0);
+  });
+
+  it('在自己半场捕捞直接入账 (无资金池)', () => {
+    const w = combat();
+    placeFish(w, [3, 3], { type: FishType.Shrimp, state: FishState.Grown, growthRemaining: 0});
+    w.boats[0].position = [3, 3];
+    const events = stepTurn(w, actions([0, { type: 'catch' }]));
+    const caught = eventsOfType(events, 'catch')[0] as any;
+    expect(caught.stole).toBe(false);
+    expect(w.players[0].money).toBe(25);
+    expect(w.boats[0].bounty).toBe(0);
+  });
+
+  it('可在对方半场投放, 放掉仍限己方半场', () => {
+    const w = combat();
+    // boat0 在对方半场 (8,3)
+    w.boats[0].position = [8, 3];
+    // 投放不再受半场限制
+    let events = stepTurn(w, actions([0, { type: 'stock', fish: FishType.Shrimp }]));
+    expect(eventsOfType(events, 'stock')).toHaveLength(1);
+    expect(w.map[3][8].fish).not.toBeNull();
+    expect(w.players[0].money).toBe(20); // 小虾零成本
+    // 放掉仍仅限己方半场
+    events = stepTurn(w, actions([0, { type: 'clear' }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1);
+  });
+});
+
+describe('engine: 健壮性', () => {
+  it('未知操作类型产生 invalid-op 事件, 不崩溃', () => {
+    const world = single();
+    const events = stepTurn(world, actions([0, { type: 'fly' }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1);
+    expect(world.boats[0].position).toEqual([3, 3]);
+  });
+
+  it('run 返回 null 视为不动作', () => {
+    const world = single();
+    const events = stepTurn(world, actions([0, null]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(0);
+  });
+
+  it('地图水域类型正确', () => {
+    const world = single();
+    expect(world.map[1][1].type).toBe(TileType.Deep);
+    expect(world.map[3][3].type).toBe(TileType.Pond);
+  });
+});
+
+describe('engine: 能量机制', () => {
+  it('Charge: 原地不动, 能量 +5, 上限 10', () => {
+    const w = single();
+    let events = stepTurn(w, actions([0, { type: 'charge' }]));
+    expect(eventsOfType(events, 'charge')).toHaveLength(1);
+    expect(w.boats[0].energy).toBe(5);
+    expect(w.boats[0].position).toEqual([3, 3]); // 原地不动
+    stepTurn(w, actions([0, { type: 'charge' }]));
+    expect(w.boats[0].energy).toBe(10); // 封顶
+    stepTurn(w, actions([0, { type: 'charge' }]));
+    expect(w.boats[0].energy).toBe(10); // 不再增加
+  });
+
+  it('CatchRow: 捕捞整行成熟鱼, 消耗 4 能量', () => {
+    const w = single();
+    w.boats[0].energy = 5;
+    w.boats[0].position = [3, 2];
+    placeFish(w, [2, 2], { type: FishType.Shrimp, state: FishState.Grown, growthRemaining: 0 });
+    placeFish(w, [4, 2], { type: FishType.Shrimp, state: FishState.Grown, growthRemaining: 0 });
+    placeFish(w, [3, 2], { type: FishType.Shrimp, state: FishState.Growing, growthRemaining: 1 });
+    const events = stepTurn(w, actions([0, { type: 'catchRow' }]));
+    expect(eventsOfType(events, 'catch')).toHaveLength(2);
+    expect(w.map[2][2].fish).toBeNull();
+    expect(w.map[2][4].fish).toBeNull();
+    expect(w.map[2][3].fish).not.toBeNull();
+    expect(w.boats[0].energy).toBe(1); // 5 - 4
+    expect(w.players[0].money).toBe(30); // 20 + 5 + 5
+  });
+
+  it('CatchRow: 能量不足时无效, 不扣能量', () => {
+    const w = single();
+    w.boats[0].energy = 3;
+    const events = stepTurn(w, actions([0, { type: 'catchRow' }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1);
+    expect(w.boats[0].energy).toBe(3);
+  });
+
+  it('CatchRow 竞技模式: 仅捕捞自己半场鱼', () => {
+    const w = combat();
+    w.boats[0].energy = 5;
+    w.boats[0].position = [3, 2];
+    placeFish(w, [2, 2], { type: FishType.Shrimp, state: FishState.Grown, growthRemaining: 0 });
+    placeFish(w, [9, 2], { type: FishType.Shrimp, state: FishState.Grown, growthRemaining: 0 }); // 对方半场
+    const events = stepTurn(w, actions([0, { type: 'catchRow' }]));
+    expect(eventsOfType(events, 'catch')).toHaveLength(1);
+    expect(w.map[2][9].fish).not.toBeNull(); // 对方半场未动
+    expect(w.players[0].money).toBe(25); // 20 + 5, 无偷菜
+  });
+
+  it('FeedRow: 从左到右给缺食鱼投喂直到饲料耗尽, 跳过不需投喂的', () => {
+    const w = single();
+    w.boats[0].energy = 3;
+    w.boats[0].feed = 2;
+    w.boats[0].position = [3, 2];
+    placeFish(w, [2, 2], { type: FishType.Shrimp, state: FishState.Hungry, growthRemaining: 2 });
+    placeFish(w, [3, 2], { type: FishType.Shrimp, state: FishState.Growing, growthRemaining: 2 });
+    placeFish(w, [4, 2], { type: FishType.Shrimp, state: FishState.Hungry, growthRemaining: 2 });
+    const events = stepTurn(w, actions([0, { type: 'feedRow' }]));
+    expect(eventsOfType(events, 'feed')).toHaveLength(2);
+    expect(w.map[2][2].fish!.state).toBe(FishState.Growing);
+    expect(w.map[2][4].fish!.state).toBe(FishState.Growing);
+    expect(w.boats[0].feed).toBe(0);
+    expect(w.boats[0].energy).toBe(0); // 3 - 3
+  });
+
+  it('FeedCol: 以渔船为中心的 3 格投喂, 饲料耗尽即停', () => {
+    const w = single();
+    w.boats[0].energy = 3;
+    w.boats[0].feed = 1;
+    w.boats[0].position = [3, 2];
+    placeFish(w, [3, 1], { type: FishType.Shrimp, state: FishState.Hungry, growthRemaining: 2 }); // 范围内 (列距 1)
+    placeFish(w, [3, 3], { type: FishType.Shrimp, state: FishState.Hungry, growthRemaining: 2 }); // 范围内 (列距 1)
+    const events = stepTurn(w, actions([0, { type: 'feedCol' }]));
+    expect(eventsOfType(events, 'feed')).toHaveLength(1); // 1 格水
+    expect(w.map[1][3].fish!.state).toBe(FishState.Growing);
+    expect(w.map[3][3].fish!.state).toBe(FishState.Hungry);
+  });
+
+  it('StockRow: 以渔船为中心的 3 格按顺序投放, 跳过深水/已有鱼, 消耗 3 能量', () => {
+    const w = single();
+    w.boats[0].energy = 3;
+    w.boats[0].position = [3, 1]; // 行 y=1, 中心 x=3 → 范围 x=2,3,4
+    w.players[0].money = 200;
+    placeFish(w, [4, 1], { type: FishType.Pufferfish, state: FishState.Growing, growthRemaining: 10 }); // 已有鱼
+    const events = stepTurn(w, actions([0, { type: 'stockRow', stocks: [FishType.Shrimp, FishType.Sardine, FishType.Shark] }]));
+    const stocks = eventsOfType(events, 'stock');
+    expect(stocks).toHaveLength(1); // x=2 深水跳过, x=3 小虾 (x=4 被占)
+    expect(w.map[1][3].fish?.type).toBe(FishType.Shrimp);
+    expect(w.map[1][2].fish).toBeNull(); // 深水不种
+    expect(w.map[1][4].fish?.type).toBe(FishType.Pufferfish); // 已有鱼未被覆盖
+    expect(w.boats[0].energy).toBe(0); // 3 - 3
+    expect(w.players[0].money).toBe(200); // 小虾 0 成本
+  });
+
+  it('StockRow: 能量不足时无效, 不扣能量不投放', () => {
+    const w = single();
+    w.boats[0].energy = 2;
+    w.boats[0].position = [3, 1];
+    w.players[0].money = 200;
+    const events = stepTurn(w, actions([0, { type: 'stockRow', stocks: [FishType.Shrimp] }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1);
+    expect(w.boats[0].energy).toBe(2);
+    expect(w.players[0].money).toBe(200);
+    expect(w.map.flat().filter((t) => t.fish)).toHaveLength(0);
+  });
+
+  it('StockCol: 以渔船为中心的 3 格按顺序投放, 消耗 3 能量', () => {
+    const w = single();
+    w.boats[0].energy = 3;
+    w.boats[0].position = [3, 3]; // 列 x=3, 中心 y=3 → 范围 y=2,3,4
+    w.players[0].money = 400; // 覆盖三种鱼总成本 (0 + 20 + 300)
+    const events = stepTurn(w, actions([0, { type: 'stockCol', stocks: [FishType.Shrimp, FishType.Sardine, FishType.Shark] }]));
+    const stocks = eventsOfType(events, 'stock');
+    expect(stocks).toHaveLength(3);
+    expect(w.map[2][3].fish?.type).toBe(FishType.Shrimp);
+    expect(w.map[3][3].fish?.type).toBe(FishType.Sardine);
+    expect(w.map[4][3].fish?.type).toBe(FishType.Shark);
+    expect(w.boats[0].energy).toBe(0);
+    expect(w.players[0].money).toBe(80);
+  });
+
+  it('StockRow 竞技模式: 以渔船为中心的 3 格投放', () => {
+    const w = combat();
+    w.boats[0].energy = 3;
+    w.boats[0].position = [3, 2]; // 范围 x=2,3,4
+    const events = stepTurn(w, actions([0, { type: 'stockRow', stocks: Array(5).fill(FishType.Shrimp) }]));
+    const stocks = eventsOfType(events, 'stock');
+    expect(stocks).toHaveLength(3); // 只种中心 3 格
+    expect(w.map[2][2].fish?.type).toBe(FishType.Shrimp);
+    expect(w.map[2][3].fish?.type).toBe(FishType.Shrimp);
+    expect(w.map[2][4].fish?.type).toBe(FishType.Shrimp);
+  });
+
+  it('Teleport: 任意距离传送, 能量 = ceil(欧氏距离)', () => {
+    const w = single();
+    w.boats[0].energy = 5;
+    w.boats[0].position = [0, 0];
+    // (0,0)→(3,4): 距离 5 → 5 能量
+    const events = stepTurn(w, actions([0, { type: 'teleport', to: [3, 4] }]));
+    expect(eventsOfType(events, 'move')).toHaveLength(1);
+    expect(w.boats[0].position).toEqual([3, 4]);
+    expect(w.boats[0].energy).toBe(0);
+  });
+
+  it('Teleport: 距离向上取整, 能量不足/目标相同/越界时无效', () => {
+    const w = single();
+    w.boats[0].energy = 2;
+    w.boats[0].position = [0, 0];
+    // (0,0)→(1,1): sqrt(2) ≈ 1.414 → ceil = 2
+    let events = stepTurn(w, actions([0, { type: 'teleport', to: [1, 1] }]));
+    expect(eventsOfType(events, 'move')).toHaveLength(1);
+    expect(w.boats[0].position).toEqual([1, 1]);
+    expect(w.boats[0].energy).toBe(0);
+    // 能量不足: 距离 5 > 剩余 0
+    events = stepTurn(w, actions([0, { type: 'teleport', to: [3, 4] }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1);
+    expect(w.boats[0].position).toEqual([1, 1]);
+    // 目标与当前位置相同
+    events = stepTurn(w, actions([0, { type: 'teleport', to: [1, 1] }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1);
+    // 越界
+    events = stepTurn(w, actions([0, { type: 'teleport', to: [9, 9] }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1);
+  });
+
+  it('Teleport 竞技模式: 只能从我方半场传送到我方半场', () => {
+    const w = combat();
+    w.boats[0].energy = 10;
+    w.boats[0].position = [3, 2]; // 我方半场
+    // 传送到对方半场 → 无效 (不扣能量)
+    let events = stepTurn(w, actions([0, { type: 'teleport', to: [10, 2] }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1);
+    expect(w.boats[0].position).toEqual([3, 2]);
+    expect(w.boats[0].energy).toBe(10);
+    // 我方半场内传送 → 成功
+    events = stepTurn(w, actions([0, { type: 'teleport', to: [6, 4] }]));
+    expect(eventsOfType(events, 'move')).toHaveLength(1);
+    expect(w.boats[0].position).toEqual([6, 4]);
+  });
+
+  it('Teleport: 目标格被占据时移动失败 (能量已消耗)', () => {
+    const w = combat();
+    w.boats[0].energy = 5;
+    w.boats[0].position = [3, 2];
+    w.boats[1].position = [5, 2]; // 另一架渔船静止占据 (5,2)
+    const events = stepTurn(w, actions([0, { type: 'teleport', to: [5, 2] }]));
+    expect(eventsOfType(events, 'move-blocked')).toHaveLength(1);
+    expect(w.boats[0].position).toEqual([3, 2]);
+    expect(w.boats[0].energy).toBe(3); // 距离 2 → 尝试时已扣 2 能量
+  });
+
+  it('InterceptRow: 拦截以施法点为中心的行 3 格内对方偷菜渔船, 消耗 6 能量', () => {
+    const w = combat();
+    w.boats[0].energy = 6;
+    w.boats[0].position = [4, 3];
+    w.boats[2].position = [9, 3]; // 行距 0, 范围内
+    w.boats[2].bounty = 7;
+    w.boats[3].position = [6, 5]; // 行距 2, 范围外
+    w.boats[3].bounty = 8;
+    const events = stepTurn(w, actions([0, { type: 'interceptRow' }]));
+    const intercepts = eventsOfType(events, 'intercept');
+    expect(intercepts).toHaveLength(1); // 只拦到行距 0 的 boat2
+    expect((intercepts[0] as any).thief).toBe(2);
+    expect(w.boats[2].bounty).toBe(0);
+    expect(w.boats[3].bounty).toBe(8); // 范围外不受影响
+    expect(w.players[0].money).toBe(27); // 20 + 7
+    expect(w.boats[0].energy).toBe(0); // 6 - 6
+  });
+
+  it('InterceptCol: 拦截以施法点为中心的列 3 格内对方偷菜渔船', () => {
+    const w = combat();
+    w.boats[0].energy = 6;
+    w.boats[0].position = [4, 2];
+    w.boats[2].position = [4, 3]; // 列距 1, 范围内
+    w.boats[2].bounty = 7;
+    w.boats[3].position = [2, 3]; // 列距 2, 范围外 (且在对方半场, 不会自动 stash)
+    w.boats[3].bounty = 8;
+    const events = stepTurn(w, actions([0, { type: 'interceptCol' }]));
+    expect(eventsOfType(events, 'intercept')).toHaveLength(1);
+    expect(w.boats[2].bounty).toBe(0);
+    expect(w.boats[3].bounty).toBe(8);
+    expect(w.players[0].money).toBe(27);
+  });
+});
+
+describe('engine: 浅滩', () => {
+  it('小虾可种在浅滩, 生长周期 ×3 向下取整 (5 → 15)', () => {
+    const w = single();
+    w.boats[0].position = [0, 0]; // 浅滩
+    const events = stepTurn(w, actions([0, { type: 'stock', fish: FishType.Shrimp }]));
+    expect(eventsOfType(events, 'stock')).toHaveLength(1);
+    expect(w.map[0][0].fish!.growthRemaining).toBe(14); // 投放回合即算第 1 个生长周期: floor(5*3)=15, 已扣 1
+    for (let i = 0; i < 13; i++) stepTurn(w, actions([0, null]));
+    expect(w.map[0][0].fish!.state).toBe(FishState.Growing);
+    stepTurn(w, actions([0, null]));
+    expect(w.map[0][0].fish!.state).toBe(FishState.Grown);
+  });
+
+  it('河豚不能种在浅滩 (canStock 不含浅滩)', () => {
+    const w = single();
+    w.boats[0].position = [0, 0];
+    const events = stepTurn(w, actions([0, { type: 'stock', fish: FishType.Pufferfish }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1);
+  });
+
+  it('浅滩不覆盖深水', () => {
+    const w = single();
+    expect(w.map[1][1].type).toBe(TileType.Deep); // 原深水位置仍是水
+  });
+});
+
+describe('engine: 缺食次数动态计算', () => {
+  it('浅滩河豚: 生长周期按浅滩 ×3 (90 周期), 缺食次数固定为基准值 2 次', () => {
+    const w = single();
+    w.players[0].money = 100;
+    w.boats[0].position = [0, 0]; // 浅滩
+    stepTurn(w, actions([0, { type: 'stock', fish: FishType.Pufferfish }]));
+    const fish = w.map[0][0].fish!;
+    expect(fish.growthRemaining).toBe(89); // floor(30*3)=90, 投放回合已扣 1
+    expect(fish.hungerAt!.length).toBe(2); // hungerCountBase = 2 (次数不随周期缩放)
+    let hungryCount = 0;
+    let guard = 0;
+    while (fish.state !== FishState.Grown && guard++ < 200) {
+      if (fish.state === FishState.Hungry) {
+        hungryCount++;
+        w.boats[0].feed = 1;
+        stepTurn(w, actions([0, { type: 'feed' }]));
+      } else {
+        stepTurn(w, actions([0, null]));
+      }
+    }
+    expect(hungryCount).toBe(2);
+    expect(fish.state).toBe(FishState.Grown);
+  });
+
+  it('河豚: 缺食 2 次, 时机在投放时确定性随机选取 (回放可复现)', () => {
+    const w = single();
+    w.players[0].money = 100;
+    stepTurn(w, actions([0, { type: 'stock', fish: FishType.Pufferfish }]));
+    const fish = w.map[3][3].fish!;
+    expect(fish.hungerAt).toHaveLength(2); // floor(30 / 15)
+    const points = [...(fish.hungerAt ?? [])];
+    // 触发点降序且在生长范围内
+    expect(points[0]).toBeGreaterThan(points[1]);
+    // 实际缺食时的剩余回合数应与投放时选取的触发点逐一吻合
+    const hungryAt: number[] = [];
+    let guard = 0;
+    while (guard++ < 100) {
+      const c = w.map[3][3].fish!;
+      if (c.state === FishState.Hungry) {
+        hungryAt.push(c.growthRemaining);
+        w.boats[0].feed = 1;
+        stepTurn(w, actions([0, { type: 'feed' }]));
+      } else {
+        stepTurn(w, actions([0, null]));
+      }
+      if (w.map[3][3].fish!.state === FishState.Grown) break;
+    }
+    expect(hungryAt).toEqual(points);
+    // 确定性: 相同随机种子重跑一遍, 缺食时机完全一致 (回放用文件里的种子重推演)
+    const w2 = single();
+    w2.rngSeed = w.rngSeed;
+    w2.players[0].money = 100;
+    stepTurn(w2, actions([0, { type: 'stock', fish: FishType.Pufferfish }]));
+    expect(w2.map[3][3].fish!.hungerAt).toEqual(points);
+    // 不同种子 → 时机不同 (种子对玩家不可预测, 防止硬编码投喂时机)
+    const w3 = single();
+    w3.rngSeed = w.rngSeed ^ 0x1234;
+    w3.players[0].money = 100;
+    stepTurn(w3, actions([0, { type: 'stock', fish: FishType.Pufferfish }]));
+    expect(w3.map[3][3].fish!.hungerAt).not.toEqual(points);
+  });
+});
+
+describe('engine: 新鱼 (鲸鱼/水母/螃蟹)', () => {
+  it('鲸鱼: 咸水生长 ×1.5 (120 周期), 投喂次数 ×2 (16 次)', () => {
+    const w = single();
+    w.players[0].money = 2000;
+    w.map[0][0] = { type: TileType.Brine, fish: null }; // 咸水
+    w.boats[0].position = [0, 0];
+    stepTurn(w, actions([0, { type: 'stock', fish: FishType.Whale }]));
+    const fish = w.map[0][0].fish!;
+    expect(fish.growthRemaining).toBe(119); // floor(80*1.5)=120 - 1
+    expect(fish.hungerAt!.length).toBe(16); // hungerCountBase 8 × 咸水投喂倍率 2
+    let hungryCount = 0;
+    let guard = 0;
+    while (fish.state !== FishState.Grown && guard++ < 200) {
+      if (fish.state === FishState.Hungry) {
+        hungryCount++;
+        w.boats[0].feed = 1;
+        stepTurn(w, actions([0, { type: 'feed' }]));
+      } else {
+        stepTurn(w, actions([0, null]));
+      }
+    }
+    expect(hungryCount).toBe(16);
+    expect(fish.state).toBe(FishState.Grown);
+  });
+
+  it('螃蟹成熟: 按上右下左顺序分 4 回合各扩散 1 株 (跳过不可投放的方向)', () => {
+    const w = single();
+    placeFish(w, [3, 3], { type: FishType.Crab, state: FishState.Growing, growthRemaining: 1 });
+    placeFish(w, [2, 3], { type: FishType.Shrimp, state: FishState.Growing, growthRemaining: 3 }); // 左: 已有鱼
+    w.map[4][3] = { type: TileType.Deep, fish: null }; // 下: 深水
+    // 成熟回合: 进入扩散期 (spreadLeft=4), 不立即扩散
+    stepTurn(w, actions([0, null]));
+    expect(w.map[3][3].fish!.state).toBe(FishState.Grown);
+    expect(w.map[3][3].fish!.spreadLeft).toBe(4);
+    expect(w.map.flat().filter((t) => t.fish?.type === FishType.Crab)).toHaveLength(1);
+    // 第 1 回合: 上 (3,2)
+    stepTurn(w, actions([0, null]));
+    expect(w.map[2][3].fish?.type).toBe(FishType.Crab);
+    // 第 2 回合: 右 (4,3) 空地 → 扩散
+    stepTurn(w, actions([0, null]));
+    expect(w.map[3][4].fish?.type).toBe(FishType.Crab);
+    // 第 3 回合: 下 (3,4) 深水 → 跳过
+    stepTurn(w, actions([0, null]));
+    expect(w.map[4][3].fish).toBeNull();
+    // 第 4 回合: 左 (2,3) 已有鱼 → 跳过; 扩散完毕
+    stepTurn(w, actions([0, null]));
+    expect(w.map[3][2].fish?.type).toBe(FishType.Shrimp);
+    expect(w.map[3][3].fish!.spreadLeft).toBe(0);
+    // 之后不再扩散
+    const before = w.map.flat().filter((t) => t.fish?.type === FishType.Crab).length;
+    stepTurn(w, actions([0, null]));
+    expect(w.map.flat().filter((t) => t.fish?.type === FishType.Crab).length).toBe(before);
+  });
+
+  it('螃蟹: 实际生长周期 = 20 + 2×场上螃蟹总数 (投放时动态计算)', () => {
+    const w = single();
+    w.players[0].money = 200;
+    placeFish(w, [3, 4], { type: FishType.Crab, state: FishState.Growing, growthRemaining: 10 });
+    placeFish(w, [6, 4], { type: FishType.Crab, state: FishState.Growing, growthRemaining: 10 });
+    w.boats[0].position = [3, 3]; // 鱼塘
+    // 场上已有 2 株 → 新种 1 株周期 = 20 + 2*2 = 24
+    stepTurn(w, actions([0, { type: 'stock', fish: FishType.Crab }]));
+    const fish = w.map[3][3].fish!;
+    expect(fish.growthRemaining).toBe(23); // 24 - 1 (投放回合算 1 个生长周期)
+    expect(fish.hungerAt!.length).toBe(1); // floor(24 / 20)
+    // 场上 3 株后再种 1 株 → 20 + 2*3 = 26
+    w.boats[0].position = [4, 3];
+    stepTurn(w, actions([0, { type: 'stock', fish: FishType.Crab }]));
+    expect(w.map[3][4].fish!.growthRemaining).toBe(25); // 26 - 1
+    expect(w.map[3][4].fish!.hungerAt!.length).toBe(1); // floor(26 / 20)
+  });
+
+  it('螃蟹: 扩散出的新螃蟹同样按场上总数动态计算生长周期', () => {
+    const w = single();
+    placeFish(w, [3, 3], { type: FishType.Crab, state: FishState.Growing, growthRemaining: 1 });
+    placeFish(w, [3, 5], { type: FishType.Crab, state: FishState.Growing, growthRemaining: 10 }); // 场上另一株
+    stepTurn(w, actions([0, null])); // 成熟, 进入扩散期
+    stepTurn(w, actions([0, null])); // 第 1 回合: 上方扩散 1 株
+    // 扩散时场上共 2 株 (含母体) → 新螃蟹周期 = 20 + 2*2 = 24
+    const spawned = w.map[2][3].fish!;
+    expect(spawned.type).toBe(FishType.Crab);
+    expect(spawned.hungerAt!.length).toBe(1); // floor(24 / 20)
+  });
+
+  it('螃蟹可多轮繁殖并捕捞 (自行生长 20 回合成熟)', () => {
+    const w = single();
+    placeFish(w, [3, 3], { type: FishType.Crab, state: FishState.Growing, growthRemaining: 1 });
+    for (let i = 0; i < 25; i++) stepTurn(w, actions([0, null]));
+    // 第 1 轮: (3,3) 成熟 → 种 (4,3),(3,2),(3,4); 20 回合后它们成熟 → 再扩散
+    const shiitakeCount = w.map.flat().filter((t) => t.fish?.type === FishType.Crab).length;
+    expect(shiitakeCount).toBeGreaterThanOrEqual(4);
+  });
+
+  it('水母: 生长中每回合按上右下左仅加速 1 株邻格鱼 (剩余 >= 2 且不缺食)', () => {
+    const w = single();
+    placeFish(w, [3, 3], { type: FishType.Jellyfish, state: FishState.Growing, growthRemaining: 10 });
+    placeFish(w, [3, 2], { type: FishType.Shark, state: FishState.Growing, growthRemaining: 95 }); // 上
+    placeFish(w, [4, 3], { type: FishType.Shark, state: FishState.Growing, growthRemaining: 95 }); // 右
+    placeFish(w, [3, 4], { type: FishType.Shark, state: FishState.Growing, growthRemaining: 95 }); // 下
+    placeFish(w, [2, 3], { type: FishType.Shark, state: FishState.Growing, growthRemaining: 95 }); // 左
+    stepTurn(w, actions([0, null]));
+    // 上 (3,2) 先结算 (行 2 早于水母所在行 3) → 95→94, 再被水母加速 → 93
+    expect(w.map[2][3].fish!.growthRemaining).toBe(93);
+    // 其余邻格本次未被加速 (每回合仅 1 株)
+    expect(w.map[3][4].fish!.growthRemaining).toBe(94); // 右
+    expect(w.map[4][3].fish!.growthRemaining).toBe(94); // 下
+    expect(w.map[3][2].fish!.growthRemaining).toBe(94); // 左
+  });
+
+  it('水母: 上方不可加速时, 依次尝试 右→下→左', () => {
+    const w = single();
+    placeFish(w, [3, 3], { type: FishType.Jellyfish, state: FishState.Growing, growthRemaining: 10 });
+    placeFish(w, [3, 2], { type: FishType.Shark, state: FishState.Growing, growthRemaining: 1 }); // 上: 距成熟 < 2, 不可加速
+    placeFish(w, [4, 3], { type: FishType.Shark, state: FishState.Growing, growthRemaining: 95 }); // 右
+    stepTurn(w, actions([0, null]));
+    // 右 (4,3): 上不可加速 → 加速右 (95→94), 右随后自身 -1 → 93
+    expect(w.map[3][4].fish!.growthRemaining).toBe(93);
+    // 上: 1→0 成熟
+    expect(w.map[2][3].fish!.state).toBe(FishState.Grown);
+  });
+});
+
+describe('engine: 鲤鱼 (autoFeed) 与 ChangeTile', () => {
+  it('鲤鱼: 生长中每回合按 上→右→下→左 给邻格缺食鱼投喂, 每回合一次', () => {
+    const w = single();
+    w.players[0].money = 200;
+    w.boats[0].position = [4, 4]; // 深水
+    stepTurn(w, actions([0, { type: 'stock', fish: FishType.Carp }]));
+    expect(w.map[4][4].fish!.growthRemaining).toBe(79); // 80 - 1
+    // 邻格缺食鱼: 上 (4,3), 右 (5,4)
+    placeFish(w, [4, 3], { type: FishType.Shrimp, state: FishState.Hungry, growthRemaining: 10 });
+    placeFish(w, [5, 4], { type: FishType.Shrimp, state: FishState.Hungry, growthRemaining: 10 });
+    // 第 1 回合: 浇 "上" (每回合一次)
+    let events = stepTurn(w, actions([0, null]));
+    let feeds = eventsOfType(events, 'feed');
+    expect(feeds).toHaveLength(1);
+    expect((feeds[0] as any).pos).toEqual([4, 3]);
+    expect(w.map[3][4].fish!.state).toBe(FishState.Growing);
+    // 第 2 回合: "上" 已恢复, 浇 "右"
+    events = stepTurn(w, actions([0, null]));
+    feeds = eventsOfType(events, 'feed');
+    expect(feeds).toHaveLength(1);
+    expect((feeds[0] as any).pos).toEqual([5, 4]);
+    expect(w.map[4][5].fish!.state).toBe(FishState.Growing);
+  });
+
+  it('ChangeTile: 消耗 3 能量, 上下左右须有同类型水域, 有鱼时不能转换', () => {
+    const w = single();
+    w.boats[0].energy = 8;
+    w.boats[0].position = [3, 3]; // 四周: (2,3)浅滩, 其余鱼塘, 无饲料池
+    // 无相邻深水 → 转 feed 失败
+    let events = stepTurn(w, actions([0, { type: 'changeTile', tileType: TileType.Deep }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1);
+    expect(w.boats[0].energy).toBe(8); // 未扣能量
+    // 相邻 (2,3) 是浅滩 → 转 sand 成功
+    events = stepTurn(w, actions([0, { type: 'changeTile', tileType: TileType.Shoal }]));
+    expect(eventsOfType(events, 'change-tile')).toHaveLength(1);
+    expect(w.map[3][3].type).toBe(TileType.Shoal);
+    expect(w.boats[0].energy).toBe(5); // 8 - 3
+    // 已存在鱼 → 不能转换
+    placeFish(w, [3, 3], { type: FishType.Shrimp, state: FishState.Growing, growthRemaining: 3 });
+    events = stepTurn(w, actions([0, { type: 'changeTile', tileType: TileType.Pond }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1);
+    // 能量不足
+    w.map[3][3].fish = null;
+    w.boats[0].energy = 2;
+    events = stepTurn(w, actions([0, { type: 'changeTile', tileType: TileType.Pond }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1);
+    // 转为鱼塘时水质为 0
+    w.boats[0].energy = 8;
+    events = stepTurn(w, actions([0, { type: 'changeTile', tileType: TileType.Pond }]));
+    expect(eventsOfType(events, 'change-tile')).toHaveLength(1);
+    expect(w.map[3][3].type).toBe(TileType.Pond);
+    expect(w.map[3][3].quality).toBe(0);
+  });
+});
+
+describe('engine: 浅滩化 / 咸水化 / 间作 / NewBoat', () => {
+  it('浅滩化: 捕捞后鱼塘水质被扣到 < 0 时转化为浅滩', () => {
+    const w = single();
+    placeFish(w, [3, 3], { type: FishType.Whale, state: FishState.Grown, growthRemaining: 0 });
+    w.map[3][3].quality = 2; // 鲸鱼耗肥 3 → 2-3 = -1 < 0
+    w.boats[0].position = [3, 3];
+    w.boats[0].energy = 6;
+    const events = stepTurn(w, actions([0, { type: 'catch' }]));
+    expect(eventsOfType(events, 'catch')).toHaveLength(1);
+    expect(w.map[3][3].type).toBe(TileType.Shoal);
+    expect(w.map[3][3].fish).toBeNull();
+    expect(w.map[3][3].quality).toBeUndefined();
+  });
+
+  it('捕捞后水质仍在 [0, 上限] 内时保持鱼塘并扣除水质', () => {
+    const w = single();
+    w.boats[0].position = [6, 4];
+    placeFish(w, [6, 4], { type: FishType.Pufferfish, state: FishState.Grown, growthRemaining: 0 });
+    const events = stepTurn(w, actions([0, { type: 'catch' }]));
+    expect(eventsOfType(events, 'catch')).toHaveLength(1);
+    expect(w.map[4][6].type).toBe(TileType.Pond);
+    expect(w.map[4][6].quality).toBe(4); // 初始 5 - 河豚耗肥 1
+  });
+
+  it('咸水化: 捕捞后鱼塘水质被增加到超过上限时转化为咸水', () => {
+    const w = single();
+    placeFish(w, [3, 3], { type: FishType.Jellyfish, state: FishState.Grown, growthRemaining: 0 });
+    w.map[3][3].quality = 9; // 水母恢复 2 → 9+2 = 11 > 10
+    w.boats[0].position = [3, 3];
+    w.boats[0].energy = 6;
+    const events = stepTurn(w, actions([0, { type: 'catch' }]));
+    expect(eventsOfType(events, 'catch')).toHaveLength(1);
+    expect(w.map[3][3].type).toBe(TileType.Brine);
+    expect(w.map[3][3].fish).toBeNull();
+  });
+
+  it('间作: 四方向至少 2 个不同鱼 → 捕捞收益 +20%', () => {
+    const w = single();
+    w.players[0].money = 0;
+    // 中心 (4,4) 沙丁鱼; 四周: 上 (4,3) 小虾, 下 (4,5) 河豚, 左 (3,4) 小虾 → 3 个不同 → +20%
+    placeFish(w, [4, 4], { type: FishType.Sardine, state: FishState.Grown, growthRemaining: 0 });
+    placeFish(w, [4, 3], { type: FishType.Shrimp, state: FishState.Grown, growthRemaining: 0 });
+    placeFish(w, [4, 5], { type: FishType.Pufferfish, state: FishState.Grown, growthRemaining: 0 });
+    placeFish(w, [3, 4], { type: FishType.Shrimp, state: FishState.Grown, growthRemaining: 0 });
+    w.boats[0].position = [4, 4];
+    stepTurn(w, actions([0, { type: 'catch' }]));
+    // 沙丁鱼 40 × 1.2 = 48
+    expect(w.players[0].money).toBe(48);
+  });
+
+  it('间作: 同类相邻不计入, 少于 2 个不同鱼不加成', () => {
+    const w = single();
+    w.players[0].money = 0;
+    placeFish(w, [4, 4], { type: FishType.Sardine, state: FishState.Grown, growthRemaining: 0 });
+    placeFish(w, [4, 3], { type: FishType.Shrimp, state: FishState.Grown, growthRemaining: 0 }); // 1 个不同
+    w.boats[0].position = [4, 4];
+    stepTurn(w, actions([0, { type: 'catch' }]));
+    expect(w.players[0].money).toBe(40); // 无加成
+  });
+
+  it('NewBoat: 花费 4000 金钱创建新渔船, 下一回合开始执行代码', () => {
+    const w = single();
+    w.players[0].money = 5000;
+    w.boats[0].energy = 6;
+    w.boats[0].position = [3, 3];
+    let events = stepTurn(w, actions([0, { type: 'newBoat', at: [6, 6] }]));
+    expect(eventsOfType(events, 'new-boat')).toHaveLength(1);
+    expect(w.players[0].money).toBe(1000); // 5000 - 4000
+    expect(w.boats).toHaveLength(2);
+    const newBoat = w.boats[1];
+    expect(newBoat.id).toBe(1);
+    expect(newBoat.player).toBe(0);
+    expect(newBoat.position).toEqual([6, 6]);
+    expect(eventsOfType(events, 'snapshot').length).toBe(0); // snapshot 由控制器补充
+  });
+
+  it('NewBoat: 金钱不足/超上限/位置被占/越界时无效', () => {
+    const w = single();
+    w.players[0].money = 3000;
+    let events = stepTurn(w, actions([0, { type: 'newBoat', at: [6, 6] }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1); // 金钱不足
+    expect(w.players[0].money).toBe(3000);
+    // 已有一架 → 达到单人上限 2 → 再创建失败
+    w.players[0].money = 5000;
+    stepTurn(w, actions([0, { type: 'newBoat', at: [6, 6] }]));
+    expect(w.boats).toHaveLength(2);
+    events = stepTurn(w, actions([0, { type: 'newBoat', at: [5, 5] }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1); // 超上限
+    expect(w.boats).toHaveLength(2);
+    // 位置被占
+    w.players[0].money = 5000;
+    events = stepTurn(w, actions([0, { type: 'newBoat', at: [3, 3] }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1); // 该位置已有渔船
+    // 越界
+    events = stepTurn(w, actions([0, { type: 'newBoat', at: [9, 9] }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1);
+  });
+
+  it('NewBoat 竞技模式: 上限 3 架/玩家', () => {
+    const w = combat();
+    w.players[0].money = 50000;
+    stepTurn(w, actions([0, { type: 'newBoat', at: [6, 6] }]));
+    expect(w.boats).toHaveLength(5); // 4 + 1
+    const events = stepTurn(w, actions([0, { type: 'newBoat', at: [6, 5] }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1); // 玩家 0 已达 3 架上限
+    expect(w.boats).toHaveLength(5);
+  });
+});
+
+describe('engine: 改善水质 (Purify)', () => {
+  it('Purify: 给脚下鱼塘改善水质 +3 水质, 消耗 3 能量; 非鱼塘失败且不扣能量', () => {
+    const w = single();
+    w.boats[0].energy = 4;
+    w.boats[0].position = [3, 3]; // 鱼塘
+    expect(w.map[3][3].quality).toBe(5);
+    let events = stepTurn(w, actions([0, { type: 'purify' }]));
+    expect(eventsOfType(events, 'purify')).toHaveLength(1);
+    expect(w.map[3][3].quality).toBe(8);
+    expect(w.boats[0].energy).toBe(1); // 4 - 3
+    // 非鱼塘 (深水): 失败且不扣能量
+    w.boats[0].position = [1, 1];
+    events = stepTurn(w, actions([0, { type: 'purify' }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1);
+    expect(w.boats[0].energy).toBe(1); // 未扣能量
+    // 能量不足
+    events = stepTurn(w, actions([0, { type: 'purify' }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1);
+  });
+
+  it('PurifyRow/Col: 行/列 3 格内鱼塘改善水质 +3, 非鱼塘跳过, 消耗 8 能量', () => {
+    // 行: (2,3) 是浅滩 → 跳过, 仅 (3,3)(4,3) 改善水质
+    const w = single();
+    w.boats[0].energy = 8;
+    w.boats[0].position = [3, 3];
+    let events = stepTurn(w, actions([0, { type: 'purifyRow' }]));
+    expect(eventsOfType(events, 'purify')).toHaveLength(2);
+    expect(w.map[3][2].type).toBe(TileType.Shoal); // 浅滩跳过
+    expect(w.map[3][3].quality).toBe(8);
+    expect(w.map[3][4].quality).toBe(8);
+    expect(w.boats[0].energy).toBe(0); // 8 - 8
+    // 列 x=3: (3,2)(3,3)(3,4) 均鱼塘 → 3 格都改善水质
+    const w2 = single();
+    w2.boats[0].energy = 8;
+    w2.boats[0].position = [3, 3];
+    events = stepTurn(w2, actions([0, { type: 'purifyCol' }]));
+    expect(eventsOfType(events, 'purify')).toHaveLength(3);
+    expect(w2.map[2][3].quality).toBe(8);
+    expect(w2.map[4][3].quality).toBe(8);
+    expect(w2.boats[0].energy).toBe(0);
+    // 竞技图深水列: (1,2) 深水 → 跳过, 仅 (1,4) 鱼塘改善水质
+    const w3 = combat();
+    w3.boats[0].energy = 8;
+    w3.boats[0].position = [1, 3]; // 列 x=1: y=2 深水, y=3 浅滩, y=4 鱼塘
+    events = stepTurn(w3, actions([0, { type: 'purifyCol' }]));
+    expect(eventsOfType(events, 'purify')).toHaveLength(1);
+    expect(w3.map[4][1].type).toBe(TileType.Pond);
+    expect(w3.map[4][1].quality).toBe(8);
+  });
+});
+
+describe('engine: 金枪鱼 (cactus)', () => {
+  it('金枪鱼: 鱼塘不能种, 浅滩可种, 不受浅滩 debuff (固定 15 周期), 捕捞后转为鱼塘 (水质 2)', () => {
+    const w = single();
+    w.players[0].money = 100;
+    // 鱼塘上不能种 (初始位置 (3,3) 是鱼塘)
+    w.boats[0].position = [3, 3];
+    let events = stepTurn(w, actions([0, { type: 'stock', fish: FishType.Tuna }]));
+    expect(eventsOfType(events, 'invalid-op')).toHaveLength(1);
+    // 浅滩上可种, 周期固定 15 (growCycles 重写: 忽略浅滩 ×3)
+    w.boats[0].position = [0, 0]; // 浅滩
+    events = stepTurn(w, actions([0, { type: 'stock', fish: FishType.Tuna }]));
+    expect(eventsOfType(events, 'stock')).toHaveLength(1);
+    expect(w.map[0][0].fish!.growthRemaining).toBe(14); // 15 - 1
+    for (let i = 0; i < 13; i++) stepTurn(w, actions([0, null]));
+    expect(w.map[0][0].fish!.state).toBe(FishState.Growing);
+    stepTurn(w, actions([0, null]));
+    expect(w.map[0][0].fish!.state).toBe(FishState.Grown);
+    // 捕捞: 脚下变鱼塘, 水质 2
+    events = stepTurn(w, actions([0, { type: 'catch' }]));
+    expect(eventsOfType(events, 'catch')).toHaveLength(1);
+    expect(w.map[0][0].type).toBe(TileType.Pond);
+    expect(w.map[0][0].quality).toBe(2);
+    expect(w.map[0][0].fish).toBeNull();
+    expect(w.players[0].money).toBe(120); // 100 - 80 + 100
+  });
+
+  it('金枪鱼: 咸水上同样固定 15 周期 (不受 ×1.5 debuff), 捕捞后转为鱼塘 (水质 2)', () => {
+    const w = single();
+    w.players[0].money = 100;
+    w.map[0][0] = { type: TileType.Brine, fish: null }; // 咸水
+    w.boats[0].position = [0, 0];
+    stepTurn(w, actions([0, { type: 'stock', fish: FishType.Tuna }]));
+    expect(w.map[0][0].fish!.growthRemaining).toBe(14); // 15 - 1 (咸水 ×1.5 被忽略)
+    for (let i = 0; i < 13; i++) stepTurn(w, actions([0, null]));
+    expect(w.map[0][0].fish!.state).toBe(FishState.Growing);
+    stepTurn(w, actions([0, null]));
+    expect(w.map[0][0].fish!.state).toBe(FishState.Grown);
+    stepTurn(w, actions([0, { type: 'catch' }]));
+    expect(w.map[0][0].type).toBe(TileType.Pond);
+    expect(w.map[0][0].quality).toBe(2);
+  });
+});
+
+describe('engine: 浅滩化细节', () => {
+  it('浅滩化: 深水上的鱼捕捞后不会转化为浅滩', () => {
+    const w = single();
+    // (1,1) 深水, 相邻 (0,1) 浅滩 → 捕捞后仍是深水
+    placeFish(w, [1, 1], { type: FishType.Hairtail, state: FishState.Grown, growthRemaining: 0 });
+    w.boats[0].position = [1, 1];
+    const events = stepTurn(w, actions([0, { type: 'catch' }]));
+    expect(eventsOfType(events, 'catch')).toHaveLength(1);
+    expect(w.map[1][1].type).toBe(TileType.Deep);
+    expect(w.map[1][1].fish).toBeNull();
+  });
+});

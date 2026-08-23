@@ -1,0 +1,113 @@
+// 后端入口。
+import { setWasmModule, setWasmUrl } from '@aiyu/shared';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { createApp, attachWebSocket } from './app';
+import { workDir } from './db';
+
+// 加载 .env (若存在): 简单键值解析, 支持 KEY=VALUE 与引号
+tryLoadDotEnv();
+
+// 读取代理环境变量, 设置全局 fetch 代理 (Node 原生 fetch 不自动读取 HTTP_PROXY 等变量)
+{
+  const proxyUrl = process.env.HTTPS_PROXY ?? process.env.HTTP_PROXY ?? process.env.https_proxy ?? process.env.http_proxy;
+  if (proxyUrl) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { setGlobalDispatcher, ProxyAgent } = require('undici');
+    setGlobalDispatcher(new ProxyAgent(proxyUrl));
+    console.log(`[aiyu] 已配置出站代理: ${proxyUrl.replace(/\/\/.*@/, '//***@')}`);
+  }
+}
+
+// 无条件把 cwd 切到稳定工作目录 (tmp/aiyu-work):
+// 启动目录可能在运行中被删除 (如重新打包 release/), 导致 worker_threads /
+// esbuild 子进程以 "uv_cwd ENOENT" 崩溃; 在 esbuild-wasm 首次加载前
+// 切换 cwd, 使其捕获到有效的 defaultWD。
+{
+  const dir = workDir();
+  mkdirSync(dir, { recursive: true });
+  try {
+    process.chdir(dir);
+  } catch {
+    // 忽略
+  }
+}
+
+// 编译玩家代码使用 esbuild-wasm, 按运行形态选择加载方式:
+// - 打包发布版 (server.cjs, AIYU_EMBEDDED_WASM=1 由打包脚本注入):
+//   用 esbuild-wasm 的浏览器入口在进程内编译; wasm 优先从 ESBUILD_WASM_URL
+//   (单独部署的远程服务器) 下载, 未配置或下载失败时回退到旁边的 esbuild.wasm 文件
+// - 常规运行: esbuild-wasm 自动使用 node_modules 内磁盘上的 wasm 文件
+async function loadCompilerWasm(): Promise<void> {
+  if (process.env.AIYU_EMBEDDED_WASM === '1') {
+    // browser 入口需要 self 全局 (Node 无 window/self)
+    (globalThis as unknown as Record<string, unknown>).self = globalThis;
+    const remote = process.env.ESBUILD_WASM_URL?.trim();
+    if (remote) {
+      try {
+        const res = await fetch(remote);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const buf = new Uint8Array(await res.arrayBuffer());
+        setWasmModule(new WebAssembly.Module(buf));
+        console.log(`[aiyu] 已从远程服务器加载 esbuild.wasm (${(buf.byteLength / 1024 / 1024).toFixed(1)} MB): ${remote}`);
+        return;
+      } catch (err) {
+        // 回退到本地文件
+        console.error(
+          `[aiyu] 从 ${remote} 下载 esbuild.wasm 失败: ${err instanceof Error ? err.message : String(err)}, 回退本地文件`
+        );
+      }
+    }
+    const wasmPath = join(__dirname, 'esbuild.wasm');
+    if (!existsSync(wasmPath)) {
+      console.error(`[aiyu] 缺少 ${wasmPath}, 请使用打包脚本生成发布版, 或配置 ESBUILD_WASM_URL 指向远程 esbuild.wasm`);
+      process.exit(1);
+    }
+    setWasmModule(new WebAssembly.Module(readFileSync(wasmPath)));
+  } else {
+    setWasmUrl(pathToFileURL(require.resolve('esbuild-wasm/esbuild.wasm')).href);
+  }
+}
+
+async function main(): Promise<void> {
+  await loadCompilerWasm();
+  const port = Number(process.env.PORT ?? 3001);
+  const host = process.env.HOST; // 绑定地址, 默认监听所有网卡
+  const onListen = (): void => {
+    console.log(`[aiyu-backend] listening on ${host ?? '0.0.0.0'}:${port}`);
+    if (!process.env.GITHUB_CLIENT_ID) {
+      console.log('[aiyu-backend] 未配置 GITHUB_CLIENT_ID, 已启用开发模式 (自动登录 local-dev)');
+    }
+  };
+  const server = host
+    ? createApp().listen(port, host, onListen)
+    : createApp().listen(port, onListen);
+  attachWebSocket(server);
+}
+
+main().catch((err) => {
+  console.error('[aiyu-backend] 启动失败:', err);
+  process.exit(1);
+});
+
+function tryLoadDotEnv(): void {
+  const file = join(process.cwd(), '.env');
+  if (!existsSync(file)) return;
+  const text = readFileSync(file, 'utf8');
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const idx = line.indexOf('=');
+    if (idx <= 0) continue;
+    const key = line.slice(0, idx).trim();
+    let value = line.slice(idx + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (process.env[key] === undefined) process.env[key] = value;
+  }
+}

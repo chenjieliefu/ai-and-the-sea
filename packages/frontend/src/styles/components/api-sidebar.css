@@ -1,0 +1,368 @@
+/* Right-side API manual sidebar: toggle, panel, doc entries, fish cards, MCP. */
+
+/* Toggle button — glued to the panel's left edge, collapsing to the screen right edge. */
+.api-toggle {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translate(-100%, -50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-strong);
+  border-right: none;
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+  background: var(--bg-surface);
+  width: 44px;
+  height: 56px;
+  padding: 0;
+  cursor: pointer;
+  font-size: 24px;
+  line-height: 1;
+  z-index: 1;
+}
+
+.api-toggle:hover,
+.api-toggle.active {
+  background: var(--bg-surface-hover);
+}
+
+.api-sidebar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 400px;
+  max-width: 92vw;
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border-strong);
+  z-index: var(--z-sidebar);
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform var(--dur-med) var(--ease-out);
+}
+
+.api-sidebar.open {
+  transform: translateX(0);
+}
+
+.api-sidebar-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.api-sidebar-head h3 {
+  margin: 0;
+}
+
+.api-sidebar-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+}
+
+/* Sidebar tab switcher. Keep it in document flow so it cannot cover the
+   expandable MCP guide immediately above it. */
+.api-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  margin: -12px -16px 12px;
+  background: var(--bg-raised);
+}
+
+/* MCP access strip at the sidebar top. */
+.mcp-strip {
+  background: var(--bg-raised);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+
+.mcp-strip summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--link);
+  list-style: none;
+}
+
+.mcp-strip summary::-webkit-details-marker {
+  display: none;
+}
+
+.mcp-strip summary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 6px;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.mcp-strip[open] summary::before {
+  transform: rotate(90deg);
+}
+
+/* Collapsed/expanded height is driven by gsap (mcpCollapse), so the body wrapper
+   is a plain block whose inline height animates and remains in normal flow. */
+.mcp-strip > .mcp-collapse-body {
+  display: block;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.mcp-strip > .mcp-collapse-body > .mcp-guide {
+  min-height: 0;
+}
+
+/* Doc tab panels fade in when switched. */
+.api-panel {
+  animation: px-fade-in var(--dur-fast) var(--ease-out) both;
+}
+
+/* Rules tab: section cards instead of a flat paragraph wall. */
+.rule-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rule-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent-border);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+}
+
+.rule-card-title {
+  margin: 0 0 6px;
+  font-family: var(--font-display);
+  font-size: 15px;
+  color: var(--text-primary);
+}
+
+.rule-card-p {
+  margin: 4px 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+
+/* Tier label: splits "term: description" rows into a scannable badge + body. */
+.rule-label {
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: var(--accent-border);
+  background: rgba(216, 168, 42, 0.14);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1px 7px;
+  font-family: var(--font-mono);
+  text-transform: none;
+}
+
+/* Inline code chips inside rule cards: distinguish function/code refs from prose. */
+.rule-card-p code,
+.rule-card-lead .rule-card-p code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent-border);
+  background: var(--bg-log);
+  border: 1px solid var(--border);
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+/* Lead overview card: stronger accent so it reads as the page intro. */
+.rule-card-lead {
+  border-left-width: 4px;
+  border-left-color: var(--accent);
+  background: var(--bg-raised);
+  margin-bottom: 12px;
+}
+
+.rule-card-lead .rule-card-title {
+  font-size: 17px;
+  color: var(--accent-border);
+}
+
+.rule-card-lead .rule-card-p {
+  color: var(--text-primary);
+}
+
+/* Doc entries. */
+.doc-entry {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.doc-entry:last-child {
+  border-bottom: none;
+}
+
+.doc-entry h4 {
+  margin: 8px 0 4px;
+  color: var(--link);
+}
+
+.doc-entry p {
+  margin: 3px 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.doc-entry code,
+.fish-card code {
+  background: var(--bg-log);
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.doc-entry .manual-code {
+  margin-top: 4px;
+}
+
+/* Unordered list (params / return fields). */
+.doc-list {
+  margin: 2px 0 2px 18px;
+  padding: 0;
+}
+
+.doc-list li {
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 2px 0;
+}
+
+/* Rules tab: larger letter-spacing and line-height for readability. */
+.rules-panel p,
+.rules-panel li {
+  letter-spacing: 0.03em;
+  line-height: 1.7;
+}
+
+.rules-panel hr {
+  margin: 14px 0;
+  border: none;
+  border-top: 1px solid var(--border);
+}
+
+/* In-doc hyperlinks. */
+.doc-link {
+  color: var(--link);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.doc-link:hover {
+  color: var(--link-hover);
+}
+
+/* Fish list. */
+.fish-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fish-card {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+
+.fish-card:hover {
+  border-color: var(--accent-border);
+}
+
+.fish-icon {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  flex: none;
+  image-rendering: auto;
+}
+
+.fish-card-body {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Head: fish name + code identifier on one row. */
+.fish-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.fish-name {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text-primary);
+}
+
+.fish-code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent-border);
+  background: var(--bg-log);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+}
+
+/* Compact stat tags instead of a verbose bullet list. */
+.fish-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.fish-tag {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 11px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px 7px;
+}
+
+.fish-tag-key {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.fish-tag-val {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+.fish-desc {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}

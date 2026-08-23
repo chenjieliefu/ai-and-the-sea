@@ -1,0 +1,14 @@
+<svg width="532" height="370" xmlns="http://www.w3.org/2000/svg" overflow="visible">
+  <!-- hull (top-down, bow pointing up) -->
+  <path d="M266 52 C 208 92, 158 186, 146 292 L 146 306 Q 266 330 386 306 L 386 292 C 374 186, 324 92, 266 52 Z"
+        fill="#e05848" stroke="#2a0d0a" stroke-width="9" stroke-linejoin="round"/>
+  <!-- deck -->
+  <path d="M266 96 C 224 124, 190 196, 180 288 Q 266 306 352 288 C 342 196, 308 124, 266 96 Z"
+        fill="#f08070" opacity="0.55"/>
+  <!-- cabin -->
+  <rect x="216" y="158" width="100" height="82" rx="12" fill="#ffd9d2" stroke="#2a0d0a" stroke-width="6"/>
+  <line x1="216" y1="186" x2="316" y2="186" stroke="#2a0d0a" stroke-width="4" opacity="0.35"/>
+  <!-- mast + flag -->
+  <line x1="266" y1="150" x2="266" y2="118" stroke="#2a0d0a" stroke-width="6"/>
+  <path d="M266 118 L 302 130 L 266 142 Z" fill="#2c78b8"/>
+</svg>

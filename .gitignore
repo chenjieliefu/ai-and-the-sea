@@ -1,0 +1,28 @@
+.DS_Store
+
+# Dependencies
+node_modules/
+packages/*/node_modules/
+
+# Build output
+packages/*/dist/
+release/
+coverage/
+packages/frontend/public/esbuild.wasm
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+!packages/*/.env.example
+
+# Runtime data
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# Editor files
+.idea/
+.vscode/
+*.swp

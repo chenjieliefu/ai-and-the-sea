@@ -1,0 +1,144 @@
+/*
+ * Design tokens — the single source of truth for all visual values.
+ * Every color / radius / z-index / font stack lives here and is referenced
+ * via var(--…) throughout components and screens. Hard-coded colors are
+ * forbidden outside this file. Canvas (renderer.ts) and the API docs
+ * (api-docs.ts) read the same tokens through theme.ts, so DOM and canvas
+ * stay in sync.
+ *
+ * Palette: a deep ocean-blue theme for AI与海.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* ---------- Background layers (deep ocean blue) ---------- */
+  --bg-main: #08131f;           /* page base */
+  --bg-raised: #0c1a2b;         /* top bars / title bars / controls */
+  --bg-panel: #0a1626;          /* editors / list rows / cards */
+  --bg-canvas: #0b1c30;         /* game canvas */
+  --bg-surface: #0e1e33;        /* modals / cards / sidebars */
+  --bg-surface-hover: #14283f;  /* sidebar toggle hover */
+  --bg-hover: #11233a;          /* list-row hover / splitters */
+  --bg-chip: #12263f;           /* user chip */
+  --bg-log: #050c14;            /* log panel / code blocks */
+
+  /* ---------- Borders (muted blue) ---------- */
+  --border: #1d3a56;            /* primary border */
+  --border-strong: #2b4d6e;     /* strong border (buttons / dialogs) */
+  --border-subtle: #13243a;     /* fine divider */
+
+  /* ---------- Text (soft sea mist) ---------- */
+  --text-primary: #e8f0f7;      /* main text */
+  --text-muted: #a7bccd;        /* secondary / hints */
+  --text-faint: #6f8aa0;        /* faint (version badges) */
+  --text-strong: #ffffff;       /* inverted / highlight text */
+
+  /* ---------- Accent (ocean blue) ---------- */
+  --accent: #4fa8e8;            /* blue CTA / leaderboard / medals */
+  --accent-hover: #6cbcf0;
+  --accent-border: #7cc8f4;
+  --accent-fg: #08121d;         /* text on the accent bg */
+  --accent-glow: rgba(79, 168, 232, 0.4); /* soft halo (menu logo) */
+
+  /* ---------- Semantic: success (sea green) ---------- */
+  --success: #57c8b8;
+  --success-bg: #12342e;
+  --success-border: #2f6e63;
+  --success-hover: #1b4a42;
+
+  /* ---------- Semantic: danger (coral red) ---------- */
+  --danger-border: #b5534a;
+  --danger-bg: #4a1f1a;
+  --danger-hover: #5e2822;
+  --danger-text: #f3a99a;      /* enemy money etc. */
+
+  /* ---------- Link / documentation blue ---------- */
+  --link: #6fc0e8;
+  --link-hover: #a8dcf5;
+
+  /* ---------- Generic button hover ---------- */
+  --btn-hover-bg: #1c3a58;
+
+  /* ---------- Money / gold (leaderboard medals, gold accent buttons, mine row) ---------- */
+  --money: #f2cf62;
+  --gold-bg: #f2cf62;           /* gold accent button background */
+  --gold-bg-hover: #ffdd7d;
+  --gold-border: #d0ac4a;       /* gold borders (gold buttons / leaderboard mine row) */
+  --gold-fg: #2e2505;           /* text on gold background */
+  --gold-tint: rgba(216, 168, 42, 0.22); /* leaderboard mine-row fill */
+
+  /* ---------- Editor lock bar ---------- */
+  --lock-bg: #152c3f;
+  --lock-border: #3a6488;
+  --lock-text: #c9e4f4;
+
+  /* ---------- Splitter active ---------- */
+  --splitter-active: #2c5070;
+
+  /* ---------- Spinner ---------- */
+  --spinner-track: #1d3a56;
+  --spinner-accent: #7cc8f4;
+
+  /* ---------- Canvas render colors (renderer.ts) ---------- */
+  --color-grid: rgba(0, 0, 0, 0.18);
+  --color-feed-border: #4a9cc9;
+  --color-fish-growing: #57c8b8;
+  --color-fish-hungry: #f0a030;
+  --color-fish-grown: #f5c04b;
+  --color-p1: #4fa8e8;
+  --color-p2: #e05848;
+  --color-bounty: #f5c042;
+  --color-feed-pip: #4aace0;
+  --color-intercept-mark: #f5d148;
+  --color-fx-feed: #7dd3fc;
+  --color-fx-catch: #f5a03b;
+  --color-fx-intercept: #f8a5a5;
+  --color-fx-purify: #5fc9b8;
+
+  /* Canvas neutral strokes / text (renderer.ts) */
+  --color-half-line: rgba(255, 255, 255, 0.5);   /* combat half-field line */
+  --color-hover-stroke: rgba(255, 255, 255, 0.9); /* hover highlight */
+  --color-boat-outline: rgba(0, 0, 0, 0.4);     /* boat fallback outline */
+  --color-boat-id-stroke: rgba(0, 0, 0, 0.85); /* sprite id stroke */
+  --color-text-on-dark: #ffffff;                /* inverted text */
+  --color-text-on-bright: #000000;             /* text on bright fills */
+  --color-charge-tint: 74, 222, 128;           /* charge effect (RGB) */
+
+  /* ---------- API method badges (api-docs.ts) ---------- */
+  --method-get: #4fa8e8;
+  --method-post: #5d9cad;
+  --method-ws: #8a9f79;
+  --method-delete: #bd6d5d;
+  --method-put: #8cae67;
+  --method-default: #6f8aa0;
+
+  /* ---------- Radius ---------- */
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-pill: 20px;
+
+  /* ---------- Motion ---------- */
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-out-expo: cubic-bezier(0.22, 1, 0.36, 1); /* Cirrus ease-out-expo */
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast: 0.16s;
+  --dur-med: 0.24s;
+  --dur-slow: 0.32s;
+
+  /* ---------- Z-index ---------- */
+  --z-tooltip: 90;
+  --z-toast: 100;
+  --z-sidebar: 140;
+  --z-modal: 200;
+
+  /* ---------- Fonts ---------- */
+  /* Readable body font (default). Pixel font is reserved for display headings only. */
+  --font-sans: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  /* Pixel display font for brand / large headings. */
+  --font-display: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'Maple Mono', ui-monospace, Consolas, monospace;
+}
