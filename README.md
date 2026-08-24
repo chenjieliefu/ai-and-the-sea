@@ -4,7 +4,13 @@
 
 Current version: **2.0.0**
 
-AI与海 is a turn-based ocean farming game built around player-authored programs. Players write TypeScript strategies to control fishing boats, stock fish, feed them, harvest them, and optimize an ocean economy within a fixed map and turn limit.
+AI and the Sea is a turn-based ocean farming game built around player-authored programs. Players write TypeScript strategies to control fishing boats, stock fish, feed them, harvest them, and optimize an ocean economy within a fixed map and turn limit.
+
+<p align="center">
+  <img src="docs/images/gameplay-overview.png" alt="AI and the Sea solo farming interface with a TypeScript editor and ocean map" width="100%" />
+</p>
+
+<p align="center"><em>Write the strategy on the left and watch the fishing boat execute it on the ocean map.</em></p>
 
 ## Core gameplay
 
@@ -86,7 +92,7 @@ The test suite covers engine semantics, mirrored coordinates, player-code compil
 ## Project structure
 
 ```text
-AI与海/
+ai-and-the-sea/
 ├── packages/
 │   ├── shared/      # Game engine, player API, compiler, and replay logic
 │   ├── backend/     # Express, SQLite, WebSocket, and secure validation

@@ -6,6 +6,12 @@
 
 AI与海是一款以玩家编程为核心的回合制海洋养鱼游戏。玩家编写 TypeScript 策略控制渔船，在有限地图和回合中投放鱼苗、喂养、捕捞并组织自己的海洋经营策略。
 
+<p align="center">
+  <img src="docs/images/gameplay-overview.png" alt="AI与海单人养鱼界面，包含 TypeScript 编辑器和海洋地图" width="100%" />
+</p>
+
+<p align="center"><em>在左侧编写策略，在右侧海洋地图上观察渔船执行。</em></p>
+
 ## 核心玩法
 
 ### 单人养鱼
